@@ -34,6 +34,18 @@ type URL struct {
 	Priority   float32 `xml:"priority"`
 }
 
+// Asp is a structure of <AspNet Sitemap-File>
+type Asp struct {
+	XMLName      xml.Name `xml:"siteMap"`
+	SitemapNodes []Node   `xml:"siteMapNode"`
+}
+
+// Node is a structure of <sitemapNode> in <AspNet Sitemap-File>
+type Node struct {
+	URL          string `xml:"url,attr"`
+	SitemapNodes []Node `xml:"siteMapNode"`
+}
+
 // fetch is page acquisition function
 var fetch = func(URL string, options interface{}) ([]byte, error) {
 	var body []byte
@@ -58,29 +70,23 @@ func Get(URL string, options interface{}) (Sitemap, error) {
 	}
 
 	idx, idxErr := ParseIndex(data)
+	asp, aspErr := ParseAsp(data)
 	smap, smapErr := Parse(data)
 
-	if idxErr != nil && smapErr != nil {
-		return Sitemap{}, errors.New("URL is not a sitemap or sitemapindex")
+	if idxErr != nil && smapErr != nil && aspErr != nil {
+		return Sitemap{}, errors.New("URL is not a sitemap or sitemapindex or asp sitemap")
 	} else if idxErr != nil {
-		return smap, nil
+		if aspErr != nil {
+			return smap, nil
+		}
+		return asp.get(), nil
 	}
 
-	smap, err = idx.get(data, options)
-	if err != nil {
-		return Sitemap{}, err
-	}
-
-	return smap, nil
+	return idx.get(data, options)
 }
 
 // Get Sitemap data from sitemapindex file
-func (s *Index) get(data []byte, options interface{}) (Sitemap, error) {
-	idx, err := ParseIndex(data)
-	if err != nil {
-		return Sitemap{}, err
-	}
-
+func (idx *Index) get(data []byte, options interface{}) (Sitemap, error) {
 	var smap Sitemap
 	for _, s := range idx.Sitemap {
 		time.Sleep(interval)
@@ -95,7 +101,24 @@ func (s *Index) get(data []byte, options interface{}) (Sitemap, error) {
 		}
 	}
 
-	return smap, err
+	return smap, nil
+}
+
+// Get Sitemap data from asp sitemap file
+func (a *Asp) get() Sitemap {
+	var smap Sitemap
+	addToSitemap(&smap, a.SitemapNodes)
+
+	return smap
+}
+
+func addToSitemap(smap *Sitemap, nodes []Node) {
+	for _, s := range nodes {
+		smap.URL = append(smap.URL, URL{Loc: s.URL})
+		if len(s.SitemapNodes) != 0 {
+			addToSitemap(smap, s.SitemapNodes)
+		}
+	}
 }
 
 // Parse create Sitemap data from text
@@ -107,6 +130,12 @@ func Parse(data []byte) (smap Sitemap, err error) {
 // ParseIndex create Index data from text
 func ParseIndex(data []byte) (idx Index, err error) {
 	err = xml.Unmarshal(data, &idx)
+	return
+}
+
+// ParseAsp create Asp data from text
+func ParseAsp(data []byte) (asp Asp, err error) {
+	err = xml.Unmarshal(data, &asp)
 	return
 }
 
